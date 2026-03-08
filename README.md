@@ -17,3 +17,6 @@ To make things worse, the Cobalt Strike BOF Loader does not even take in full CO
 
 This project aims to be a true 1:1 replica of the Cobalt Strike implementation, where any issues in one should be reproducible in the other.
 
+## Credits
+- Fortra, for being the cause of my misery
+- A bunch of LLMs I used to mass clean up and port BOFLoader functionality, and to comment code because I am lazy
