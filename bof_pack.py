@@ -186,6 +186,44 @@ class COFFParser:
         return 0
 
 
+# Beacon API symbol name -> function table slot index
+# Must match the slot order in bofloader.c's init_dummy_beacon_table()
+BEACON_API_SLOTS = {
+    'BeaconDataParse':                0,
+    'BeaconDataInt':                  1,
+    'BeaconDataShort':                2,
+    'BeaconDataLength':               3,
+    'BeaconDataExtract':              4,
+    'BeaconFormatAlloc':              5,
+    'BeaconFormatReset':              6,
+    'BeaconFormatFree':               7,
+    'BeaconFormatAppend':             8,
+    'BeaconFormatPrintf':             9,
+    'BeaconFormatToString':          10,
+    'BeaconFormatInt':               11,
+    'BeaconPrintf':                  12,
+    'BeaconOutput':                  13,
+    'BeaconUseToken':                14,
+    'BeaconRevertToken':             15,
+    'BeaconIsAdmin':                 16,
+    'BeaconGetSpawnTo':              17,
+    'BeaconInjectProcess':           18,
+    'BeaconInjectTemporaryProcess':  19,
+    'BeaconCleanupProcess':          20,
+    'toWideChar':                    21,
+}
+
+
+def get_beacon_api_slot(name: str) -> int:
+    """If name is a Beacon API import (__imp_BeaconXxx), return its slot index, else -1"""
+    for prefix in ('__imp_', '__imp__'):
+        if name.startswith(prefix):
+            api_name = name[len(prefix):]
+            if api_name in BEACON_API_SLOTS:
+                return BEACON_API_SLOTS[api_name]
+    return -1
+
+
 def is_dynamic_function(name: str) -> bool:
     """Check if symbol is a dynamic Win32 API (Module$Function pattern)"""
     if not (name.startswith('__imp__') or name.startswith('__imp_')):
@@ -340,8 +378,12 @@ class BlobBuilder:
                     else:
                         print(f"Warning: Unknown target section '{target_section_name}' for symbol '{sym_name}'")
                 else:
-                    # External symbol (might be beacon API or unknown)
-                    print(f"Warning: Unresolved external symbol '{sym_name}' at offset {offset}")
+                    # External symbol - check if it's a Beacon API
+                    slot = get_beacon_api_slot(sym_name)
+                    if slot >= 0:
+                        self.add_reloc(BASE_TEXT, reloc_type, slot, offset, 0)
+                    else:
+                        print(f"Warning: Unresolved external symbol '{sym_name}' at offset {offset}")
 
         # Process .data relocations if any
         if '.data' in self.coff.sections:
@@ -354,11 +396,18 @@ class BlobBuilder:
                 offset = reloc['offset']
                 reloc_type = reloc['type']
 
-                if sym_section > 0:
+                if is_dynamic_function(sym_name):
+                    module, func = parse_dynamic_function(sym_name)
+                    self.add_dynamic_reloc(BASE_DATA, reloc_type, offset, module, func)
+                elif sym_section > 0:
                     target_section_name = section_num_to_name.get(sym_section, '')
                     target_code = get_section_target(target_section_name)
                     if target_code:
                         self.add_reloc(BASE_DATA, reloc_type, target_code, offset, sym_value)
+                else:
+                    slot = get_beacon_api_slot(sym_name)
+                    if slot >= 0:
+                        self.add_reloc(BASE_DATA, reloc_type, slot, offset, 0)
 
         self.add_end_marker()
 

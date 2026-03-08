@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <windows.h>
 
 /* ───────────────────────────────────────────────────────────────────────────
@@ -150,7 +151,17 @@ BEACON_STUB(10, BeaconFormatToString)
 BEACON_STUB(11, BeaconFormatInt)
 
 /* Output API */
-BEACON_STUB(12, BeaconPrintf)
+static intptr_t stub_BeaconPrintf(void *a0, void *a1, ...)
+{
+    (void)a0; /* type – ignored, we just print to stdout */
+    char *fmt = (char *)a1;
+    if (!fmt) return 0;
+    va_list va;
+    va_start(va, a1);
+    vprintf(fmt, va);
+    va_end(va);
+    return 0;
+}
 BEACON_STUB(13, BeaconOutput)
 
 /* Token API */
