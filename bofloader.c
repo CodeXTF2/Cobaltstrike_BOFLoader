@@ -115,15 +115,13 @@ static uint8_t **reserve_func_slot(uint8_t **table, size_t table_slots, uintptr_
 }
 
 /* ───────────────────────────────────────────────────────────────────────────
- *  Dummy Beacon API stubs
+ *  Beacon API stubs
  *
- *  Slot layout matches the order InitializeBeaconApiTable writes at runtime
- *  (same order as the DECLSPEC_IMPORT list in beacon.h).
+ *  Data API and Format API have real implementations that match Cobalt
+ *  Strike's datap/formatp semantics.  bof_pack.py uses little-endian
+ *  encoding for ints/shorts and 4-byte LE length prefixes for strings/blobs.
  *
- *  Signature: 4 pointer-width params covers every Beacon API on x64
- *  (register args RCX/RDX/R8/R9).  APIs that pass extra args on the stack
- *  (e.g. BeaconInjectProcess) just ignore them.  Return intptr_t so that
- *  returning 0 works as both NULL and integer 0.
+ *  Remaining stubs (token, spawn, etc.) are no-op placeholders.
  * ─────────────────────────────────────────────────────────────────────────── */
 
 #define BEACON_STUB(SLOT, NAME)                                                  \
@@ -134,26 +132,175 @@ static uint8_t **reserve_func_slot(uint8_t **table, size_t table_slots, uintptr_
         return 0;                                                                \
     }
 
-/* Data API */
-BEACON_STUB( 0, BeaconDataParse)
-BEACON_STUB( 1, BeaconDataInt)
-BEACON_STUB( 2, BeaconDataShort)
-BEACON_STUB( 3, BeaconDataLength)
-BEACON_STUB( 4, BeaconDataExtract)
+/* ── Data API (real implementation) ─────────────────────────────────────── */
 
-/* Format API */
-BEACON_STUB( 5, BeaconFormatAlloc)
-BEACON_STUB( 6, BeaconFormatReset)
-BEACON_STUB( 7, BeaconFormatFree)
-BEACON_STUB( 8, BeaconFormatAppend)
-BEACON_STUB( 9, BeaconFormatPrintf)
-BEACON_STUB(10, BeaconFormatToString)
-BEACON_STUB(11, BeaconFormatInt)
+typedef struct { char *original; char *buffer; int length; int size; } beacon_datap;
+typedef struct { char *original; char *buffer; int length; int size; } beacon_formatp;
 
-/* Output API */
+static intptr_t stub_BeaconDataParse(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a3;
+    beacon_datap *p = (beacon_datap *)a0;
+    char *buf       = (char *)a1;
+    int   sz        = (int)(intptr_t)a2;
+    fprintf(stderr, "[Beacon API 0] BeaconDataParse(buf=%p, size=%d)\n", buf, sz);
+    p->original = buf;
+    p->buffer   = buf;
+    p->length   = sz;
+    p->size     = sz;
+    return 0;
+}
+
+static intptr_t stub_BeaconDataInt(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a1; (void)a2; (void)a3;
+    beacon_datap *p = (beacon_datap *)a0;
+    if (p->length < 4) { fprintf(stderr, "[Beacon API 1] BeaconDataInt: underflow\n"); return 0; }
+    uint32_t v;
+    memcpy(&v, p->buffer, 4);
+    p->buffer += 4;
+    p->length -= 4;
+    fprintf(stderr, "[Beacon API 1] BeaconDataInt -> %d\n", (int)v);
+    return (intptr_t)v;
+}
+
+static intptr_t stub_BeaconDataShort(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a1; (void)a2; (void)a3;
+    beacon_datap *p = (beacon_datap *)a0;
+    if (p->length < 2) { fprintf(stderr, "[Beacon API 2] BeaconDataShort: underflow\n"); return 0; }
+    uint16_t v;
+    memcpy(&v, p->buffer, 2);
+    p->buffer += 2;
+    p->length -= 2;
+    fprintf(stderr, "[Beacon API 2] BeaconDataShort -> %d\n", (int)v);
+    return (intptr_t)v;
+}
+
+static intptr_t stub_BeaconDataLength(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a1; (void)a2; (void)a3;
+    beacon_datap *p = (beacon_datap *)a0;
+    fprintf(stderr, "[Beacon API 3] BeaconDataLength -> %d\n", p->length);
+    return (intptr_t)p->length;
+}
+
+static intptr_t stub_BeaconDataExtract(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a2; (void)a3;
+    beacon_datap *p = (beacon_datap *)a0;
+    int *outlen     = (int *)a1;
+    if (p->length < 4) { fprintf(stderr, "[Beacon API 4] BeaconDataExtract: underflow\n"); return 0; }
+    uint32_t len;
+    memcpy(&len, p->buffer, 4);
+    p->buffer += 4;
+    p->length -= 4;
+    if ((int)len > p->length) { fprintf(stderr, "[Beacon API 4] BeaconDataExtract: len %u > remaining %d\n", len, p->length); return 0; }
+    char *data = p->buffer;
+    p->buffer += len;
+    p->length -= len;
+    if (outlen) *outlen = (int)len;
+    fprintf(stderr, "[Beacon API 4] BeaconDataExtract(%u bytes)\n", len);
+    return (intptr_t)data;
+}
+
+/* ── Format API (real implementation) ───────────────────────────────────── */
+
+static intptr_t stub_BeaconFormatAlloc(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a2; (void)a3;
+    beacon_formatp *f = (beacon_formatp *)a0;
+    int maxsz         = (int)(intptr_t)a1;
+    f->original = (char *)malloc(maxsz);
+    f->buffer   = f->original;
+    f->length   = 0;
+    f->size     = maxsz;
+    if (f->original) memset(f->original, 0, maxsz);
+    fprintf(stderr, "[Beacon API 5] BeaconFormatAlloc(%d)\n", maxsz);
+    return 0;
+}
+
+static intptr_t stub_BeaconFormatReset(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a1; (void)a2; (void)a3;
+    beacon_formatp *f = (beacon_formatp *)a0;
+    f->buffer = f->original;
+    f->length = 0;
+    fprintf(stderr, "[Beacon API 6] BeaconFormatReset\n");
+    return 0;
+}
+
+static intptr_t stub_BeaconFormatFree(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a1; (void)a2; (void)a3;
+    beacon_formatp *f = (beacon_formatp *)a0;
+    if (f->original) free(f->original);
+    f->original = NULL;
+    f->buffer   = NULL;
+    f->length   = 0;
+    f->size     = 0;
+    fprintf(stderr, "[Beacon API 7] BeaconFormatFree\n");
+    return 0;
+}
+
+static intptr_t stub_BeaconFormatAppend(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a3;
+    beacon_formatp *f = (beacon_formatp *)a0;
+    char *text        = (char *)a1;
+    int   len         = (int)(intptr_t)a2;
+    if (f->length + len <= f->size) {
+        memcpy(f->original + f->length, text, len);
+        f->length += len;
+    }
+    fprintf(stderr, "[Beacon API 8] BeaconFormatAppend(%d bytes)\n", len);
+    return 0;
+}
+
+static intptr_t stub_BeaconFormatPrintf(void *a0, void *a1, ...)
+{
+    beacon_formatp *f = (beacon_formatp *)a0;
+    char *fmt         = (char *)a1;
+    if (!fmt || !f->original) return 0;
+    va_list va;
+    va_start(va, a1);
+    int remaining = f->size - f->length;
+    if (remaining > 0) {
+        int n = vsnprintf(f->original + f->length, remaining, fmt, va);
+        if (n > 0) f->length += (n < remaining) ? n : remaining - 1;
+    }
+    va_end(va);
+    return 0;
+}
+
+static intptr_t stub_BeaconFormatToString(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a2; (void)a3;
+    beacon_formatp *f = (beacon_formatp *)a0;
+    int *outlen       = (int *)a1;
+    if (outlen) *outlen = f->length;
+    fprintf(stderr, "[Beacon API 10] BeaconFormatToString(%d bytes)\n", f->length);
+    return (intptr_t)f->original;
+}
+
+static intptr_t stub_BeaconFormatInt(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a2; (void)a3;
+    beacon_formatp *f = (beacon_formatp *)a0;
+    int value         = (int)(intptr_t)a1;
+    if (f->length + 4 <= f->size) {
+        memcpy(f->original + f->length, &value, 4);
+        f->length += 4;
+    }
+    fprintf(stderr, "[Beacon API 11] BeaconFormatInt(%d)\n", value);
+    return 0;
+}
+
+/* ── Output API ─────────────────────────────────────────────────────────── */
+
 static intptr_t stub_BeaconPrintf(void *a0, void *a1, ...)
 {
-    (void)a0; /* type – ignored, we just print to stdout */
+    (void)a0;
     char *fmt = (char *)a1;
     if (!fmt) return 0;
     va_list va;
@@ -162,20 +309,31 @@ static intptr_t stub_BeaconPrintf(void *a0, void *a1, ...)
     va_end(va);
     return 0;
 }
-BEACON_STUB(13, BeaconOutput)
 
-/* Token API */
+static intptr_t stub_BeaconOutput(void *a0, void *a1, void *a2, void *a3)
+{
+    (void)a0; (void)a3;
+    char *buf = (char *)a1;
+    int   len = (int)(intptr_t)a2;
+    if (buf && len > 0) fwrite(buf, 1, len, stdout);
+    return 0;
+}
+
+/* ── Token API (stubs) ──────────────────────────────────────────────────── */
+
 BEACON_STUB(14, BeaconUseToken)
 BEACON_STUB(15, BeaconRevertToken)
 BEACON_STUB(16, BeaconIsAdmin)
 
-/* Spawn+Inject API */
+/* ── Spawn+Inject API (stubs) ───────────────────────────────────────────── */
+
 BEACON_STUB(17, BeaconGetSpawnTo)
 BEACON_STUB(18, BeaconInjectProcess)
 BEACON_STUB(19, BeaconInjectTemporaryProcess)
 BEACON_STUB(20, BeaconCleanupProcess)
 
-/* Utility */
+/* ── Utility (stubs) ────────────────────────────────────────────────────── */
+
 BEACON_STUB(21, toWideChar)
 
 #define BEACON_API_COUNT 22
@@ -185,20 +343,20 @@ typedef intptr_t (*beacon_stub_t)(void *, void *, void *, void *);
 static void init_dummy_beacon_table(uint8_t **table, size_t table_size)
 {
     static const beacon_stub_t stubs[BEACON_API_COUNT] = {
-        stub_BeaconDataParse,               /* 0  */
-        stub_BeaconDataInt,                 /* 1  */
-        stub_BeaconDataShort,               /* 2  */
-        stub_BeaconDataLength,              /* 3  */
-        stub_BeaconDataExtract,             /* 4  */
-        stub_BeaconFormatAlloc,             /* 5  */
-        stub_BeaconFormatReset,             /* 6  */
-        stub_BeaconFormatFree,              /* 7  */
-        stub_BeaconFormatAppend,            /* 8  */
-        stub_BeaconFormatPrintf,            /* 9  */
-        stub_BeaconFormatToString,          /* 10 */
-        stub_BeaconFormatInt,               /* 11 */
-        stub_BeaconPrintf,                  /* 12 */
-        stub_BeaconOutput,                  /* 13 */
+        (beacon_stub_t)stub_BeaconDataParse,       /* 0  */
+        (beacon_stub_t)stub_BeaconDataInt,         /* 1  */
+        (beacon_stub_t)stub_BeaconDataShort,       /* 2  */
+        (beacon_stub_t)stub_BeaconDataLength,      /* 3  */
+        (beacon_stub_t)stub_BeaconDataExtract,     /* 4  */
+        (beacon_stub_t)stub_BeaconFormatAlloc,     /* 5  */
+        (beacon_stub_t)stub_BeaconFormatReset,     /* 6  */
+        (beacon_stub_t)stub_BeaconFormatFree,      /* 7  */
+        (beacon_stub_t)stub_BeaconFormatAppend,    /* 8  */
+        (beacon_stub_t)stub_BeaconFormatPrintf,    /* 9  */
+        (beacon_stub_t)stub_BeaconFormatToString,  /* 10 */
+        (beacon_stub_t)stub_BeaconFormatInt,       /* 11 */
+        (beacon_stub_t)stub_BeaconPrintf,          /* 12 */
+        (beacon_stub_t)stub_BeaconOutput,          /* 13 */
         stub_BeaconUseToken,                /* 14 */
         stub_BeaconRevertToken,             /* 15 */
         stub_BeaconIsAdmin,                 /* 16 */
