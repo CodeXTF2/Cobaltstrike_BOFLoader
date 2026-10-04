@@ -307,6 +307,7 @@ static intptr_t stub_BeaconPrintf(void *a0, void *a1, ...)
     va_start(va, a1);
     vprintf(fmt, va);
     va_end(va);
+    putchar('\n');
     return 0;
 }
 
