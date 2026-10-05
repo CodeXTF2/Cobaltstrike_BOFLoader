@@ -303,11 +303,31 @@ static intptr_t stub_BeaconPrintf(void *a0, void *a1, ...)
     (void)a0;
     char *fmt = (char *)a1;
     if (!fmt) return 0;
+
     va_list va;
     va_start(va, a1);
-    vprintf(fmt, va);
+    va_list count_va;
+    va_copy(count_va, va);
+    int output_len = _vscprintf(fmt, count_va);
+    va_end(count_va);
+
+    if (output_len < 0) {
+        va_end(va);
+        return 0;
+    }
+
+    char *output = (char *)malloc((size_t)output_len + 1);
+    if (!output) {
+        va_end(va);
+        return 0;
+    }
+    vsnprintf(output, (size_t)output_len + 1, fmt, va);
     va_end(va);
+
+    printf("[+] host called home, sent: %d bytes\n", output_len);
+    if (output_len > 0) fwrite(output, 1, (size_t)output_len, stdout);
     putchar('\n');
+    free(output);
     return 0;
 }
 
